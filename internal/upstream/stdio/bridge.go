@@ -453,14 +453,22 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.clearListen(st)
 	sse := startSSE(w)
+	q := newQuiet(s.p.clock)
+	defer q.stop()
 	for {
 		select {
 		case m := <-st.out:
+			q.writing()
 			if sse.write(m) != nil {
 				s.undeliverable(m, "client_disconnected")
 				return
 			}
 			s.refill(st)
+		case <-q.elapsed():
+			q.writing()
+			if sse.keepAlive() != nil {
+				return
+			}
 		case <-st.done:
 			return
 		case <-r.Context().Done():

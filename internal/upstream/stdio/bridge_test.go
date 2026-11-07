@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,8 +96,9 @@ func (b *bridgeHarness) initialize(t *testing.T, user string) string {
 
 // events reads SSE data lines one at a time.
 type events struct {
-	t  *testing.T
-	ch chan string
+	t        *testing.T
+	ch       chan string
+	comments atomic.Int64 // comment lines seen, which a client ignores: keep-alives
 }
 
 func eventsOf(t *testing.T, res *http.Response) *events {
@@ -113,7 +115,9 @@ func eventsOf(t *testing.T, res *http.Response) *events {
 		defer close(e.ch)
 		sc := bufio.NewScanner(res.Body)
 		for sc.Scan() {
-			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+			if strings.HasPrefix(sc.Text(), ":") {
+				e.comments.Add(1) // counted before any later event is delivered
+			} else if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
 				e.ch <- d
 			}
 		}

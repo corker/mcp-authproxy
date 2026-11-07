@@ -116,6 +116,7 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | A 2026-07-28 request whose client closes its stream | The upstream gets `notifications/cancelled` for it |
 | A 2026-07-28 request whose `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header is missing or does not match its body | `400` with `HeaderMismatch` (`-32020`): byward checks these for the server, which never sees headers |
 | `subscriptions/listen` | Its stream carries the acknowledgement and the notifications the client asked for, under the client's own request id; it ends when the client closes it (the upstream gets `notifications/cancelled`), when the upstream answers it, or when the upstream tears it down |
+| A `subscriptions/listen` stream or a session's GET stream with nothing to send for 15 s | A comment line (`:`), which clients ignore, keeps it open through proxies that cut quiet connections: nginx `proxy_read_timeout` and an AWS ALB's idle timeout default to 60 s, Cloudflare's proxy read timeout to 125 s. If the comment cannot be written, the client is gone: a listen is cancelled on the upstream |
 | `GET` or `DELETE` without a session | `405`: only a 2025-11-25 MCP session has them |
 | A session that ended, or another user's | `404`; the client starts a new session |
 | The upstream process crashes, exits or closes its stdout | Open requests get a JSON-RPC error (`-32603`, `upstream process exited`), later ones `404`. The process is not restarted; one that closed stdout but keeps running is stopped after 5 s |
