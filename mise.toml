@@ -33,8 +33,8 @@ run = "go vet -tags=integration ./..."
 [tasks.lint]
 description = "golangci-lint once per release GOOS, so files behind build constraints are linted on any host"
 # Keep in sync with builds.goos in .goreleaser.yaml (and scripts/licenses.sh).
-# The integration tag adds its test files (the restore drill) to what is linted.
-run = ["GOOS=linux golangci-lint run --build-tags integration", "GOOS=darwin golangci-lint run --build-tags integration"]
+# The integration and load tags add their test files (the restore drill, the load test) to what is linted.
+run = ["GOOS=linux golangci-lint run --build-tags integration,load", "GOOS=darwin golangci-lint run --build-tags integration,load"]
 
 [tasks.vuln]
 description = "govulncheck once per release GOOS: fails on a known vulnerability our code can reach (queries vuln.go.dev)"
@@ -68,6 +68,10 @@ run = "sh scripts/assertion/run.sh"
 [tasks."test:real-entra"]
 description = "Scheduled real-Entra lane: byward check and doctor against the maintainer's tenant, with GitHub's OIDC token as the federated credential; GitHub Actions only, never part of test:integration (scripts/real-entra/run.sh, docs/how-to/real-entra-lane.md)"
 run = "sh scripts/real-entra/run.sh"
+
+[tasks."test:load"]
+description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/how-to/load-test.md)"
+run = "go test -count=1 -v -timeout 15m -tags=load -run ^TestLoad ./internal/server/"
 
 [tasks."test:ui"]
 description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2 AA), screenshots in build/ui/screenshots (needs Docker)"

@@ -1,0 +1,65 @@
+name: load
+
+# Scheduled lane (ADR-0024 §10): the latency the proxy adds per MCP request, against a budget of
+# 2 ms p99 (docs/how-to/load-test.md). It also runs on a pull request that changes the harness or
+# this workflow, so a change to the measurement is measured; it never blocks other pull requests.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - internal/server/load_test.go
+      - .github/workflows/load.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go
+      - run: mise run test:load
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: load-results
+          path: build/load/results.json
+          retention-days: 90
+          if-no-files-found: warn
+
+  # One issue, labelled load-test, opened on the first scheduled failure and commented on after that.
+  notify:
+    needs: load
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create load-test --color B60205 --description "The scheduled load test is failing" 2>/dev/null || true
+          open=$(gh issue list --label load-test --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --label load-test --title "The scheduled load test is failing" \
+              --body "The load test failed: $RUN_URL. See docs/how-to/load-test.md."
+          fi

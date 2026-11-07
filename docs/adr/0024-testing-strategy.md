@@ -146,3 +146,11 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
   - It runs on the Go integration lane, not the §4a shell lane. Signing in needs the in-process
     fake IdP, which the binary cannot reach.
   - The CLI is the §4a pin: `scripts/conformance/run.sh --install-only` builds it.
+
+## Amendment 2026-11-07 (#164): the load test
+
+§10's load test is `internal/server/load_test.go` (build tag `load`, `mise run test:load`), run
+weekly by `.github/workflows/load.yml`. It sends the same requests to the upstream directly and
+through the wired proxy, open loop at a fixed rate, in alternating rounds, and gates on the median
+over seven rounds of the added p99; a companion test proves that 5 ms more fails the gate
+([how-to](../how-to/load-test.md)).
