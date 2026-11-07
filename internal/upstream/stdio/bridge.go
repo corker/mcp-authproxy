@@ -452,9 +452,9 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.clearListen(st)
-	sse := startSSE(w)
-	q := newQuiet(s.p.clock)
+	q := newQuiet(s.p.clock) // before the stream starts: a client that has it has a running timer
 	defer q.stop()
+	sse := startSSE(w)
 	for {
 		select {
 		case m := <-st.out:
@@ -463,12 +463,14 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 				s.undeliverable(m, "client_disconnected")
 				return
 			}
+			q.writing()
 			s.refill(st)
 		case <-q.elapsed():
 			q.writing()
 			if sse.keepAlive() != nil {
 				return
 			}
+			q.writing()
 		case <-st.done:
 			return
 		case <-r.Context().Done():
