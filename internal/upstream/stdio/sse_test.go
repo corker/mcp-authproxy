@@ -255,3 +255,102 @@ func TestAKeepAliveThatCannotBeWrittenEndsTheLegacyGETStream(t *testing.T) {
 		})
 	}
 }
+
+// gatedWriter is a ResponseWriter whose gate-th flush blocks until release is closed, so a test can
+// move the clock on at an exact point: while the stream is starting, or while an event is going out
+// and its reader may already have it.
+type gatedWriter struct {
+	header  http.Header
+	mu      sync.Mutex
+	body    bytes.Buffer
+	flushes int
+	gate    int
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func newGatedWriter(gate int) *gatedWriter {
+	return &gatedWriter{header: http.Header{}, gate: gate, blocked: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (w *gatedWriter) Header() http.Header { return w.header }
+func (w *gatedWriter) WriteHeader(int)     {}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(p)
+}
+
+func (w *gatedWriter) FlushError() error {
+	w.mu.Lock()
+	w.flushes++
+	n := w.flushes
+	w.mu.Unlock()
+	if n == w.gate {
+		close(w.blocked)
+		<-w.release
+	}
+	return nil
+}
+
+func (w *gatedWriter) written() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.String()
+}
+
+// gatedStreams serve one kind of long-lived stream into w; cause makes the stream write its first
+// event after its start.
+var gatedStreams = map[string]func(t *testing.T, ctx context.Context, w http.ResponseWriter) (b *bridgeHarness, serve, cause func()){
+	"modern listen": func(t *testing.T, ctx context.Context, w http.ResponseWriter) (*bridgeHarness, func(), func()) {
+		b := newModernBridge(t, nil)
+		body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set(userHeader, "alice")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		for h := modernHeaders(body); len(h) >= 2; h = h[2:] {
+			req.Header.Set(h[0], h[1])
+		}
+		return b, func() { b.bridge.ServeHTTP(w, req) }, func() {} // its first event is the acknowledgement
+	},
+	"legacy GET": func(t *testing.T, ctx context.Context, w http.ResponseWriter) (*bridgeHarness, func(), func()) {
+		b := newBridge(t, nil)
+		session := b.initialize(t, "alice")
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+		req.Header.Set(userHeader, "alice")
+		req.Header.Set(sessionHeader, session)
+		req.Header.Set("Accept", "text/event-stream")
+		return b, func() { b.bridge.ServeHTTP(w, req) }, func() {
+			go readEvents(t, b.post(t, "alice", session, `{"jsonrpc":"2.0","id":1,"method":"announce"}`))
+		}
+	},
+}
+
+func TestTheQuietPeriodStartsBeforeTheStreamAndBeforeEachWrite(t *testing.T) {
+	// If the timer were armed after the stream started, or restarted after a write, a clock that
+	// moves on while the client already has the start or the write would lose that period's comment.
+	for name, open := range gatedStreams {
+		for gate, at := range map[int]string{1: "while the stream starts", 2: "while its first event goes out"} {
+			t.Run(name+" "+at, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				w := newGatedWriter(gate)
+				b, serve, cause := open(t, ctx, w)
+				done := make(chan struct{})
+				go func() { defer close(done); serve() }()
+				t.Cleanup(func() { cancel(); <-done })
+				if gate == 2 {
+					cause()
+				}
+				select {
+				case <-w.blocked:
+				case <-time.After(guard):
+					t.Fatal("the stream never reached the flush")
+				}
+				b.clk.Advance(keepAliveInterval)
+				close(w.release)
+				eventually(t, "the keep-alive the period was due", func() bool { return strings.Contains(w.written(), ":\r\n") })
+			})
+		}
+	}
+}
