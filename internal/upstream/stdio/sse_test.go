@@ -42,7 +42,10 @@ func TestQuietSignalsAfterTheIntervalAndAWriteDropsADueSignal(t *testing.T) {
 	if !ready(q) {
 		t.Fatal("no signal after the interval")
 	}
-	clk.Advance(keepAliveInterval) // the timer is not re-armed until the next write
+	clk.Advance(keepAliveInterval) // that signal was taken: nothing re-arms the timer until a write
+	if ready(q) {
+		t.Fatal("re-armed itself without a write")
+	}
 	q.writing()
 	clk.Advance(keepAliveInterval - time.Nanosecond)
 	q.writing()
@@ -99,8 +102,7 @@ var longLivedStreams = map[string]longLived{
 				t.Fatalf("GET stream got %q, want the announcement", got)
 			}
 		}
-		push() // the stream is being served, so its quiet period has started
-		return b, ev, push
+		return b, ev, push // its headers came after its quiet timer was armed
 	},
 }
 
@@ -132,20 +134,8 @@ func TestAModernRequestThatIsNotAListenGetsNoKeepAlive(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The headers arrive once the stream has started, after any quiet timer is armed.
 	ev := eventsOf(t, b.modernCtx(t, ctx, "alice", modernBody(`1`, "hold", "", "")))
-	eventually(t, "the request to reach the upstream", func() bool {
-		b.bridge.mu.Lock()
-		defer b.bridge.mu.Unlock()
-		for _, c := range b.bridge.users {
-			c.mu.Lock()
-			n := len(c.byID)
-			c.mu.Unlock()
-			if n == 1 {
-				return true
-			}
-		}
-		return false
-	})
 	b.clk.Advance(2 * keepAliveInterval)
 	time.Sleep(100 * time.Millisecond) // a keep-alive would be written within this; none may come
 	if n := ev.comments.Load(); n != 0 {

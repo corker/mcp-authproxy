@@ -411,14 +411,12 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 				c.cancel(q)
 				return
 			}
-			silence.writing()
 		case <-silence.elapsed():
 			silence.writing()
 			if out.keepAlive() != nil { // the client is gone: as for a closed stream
 				c.cancel(q)
 				return
 			}
-			silence.writing()
 		case m := <-q.final:
 			finish(m)
 			return

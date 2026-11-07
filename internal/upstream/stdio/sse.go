@@ -74,9 +74,9 @@ func (q *quiet) elapsed() <-chan struct{} {
 }
 
 // writing restarts the quiet period; call it before each write, so whoever reads the write sees
-// the period already restarted, and again after it, since a slow write can outlast the period. A
-// signal already due is dropped; one racing the restart on a real clock may still arrive, which
-// costs one early comment line.
+// the period already restarted. A signal already due is dropped. A write that blocks longer than
+// the period, or a signal racing the restart on a real clock, costs one early comment line, which
+// clients ignore; restarting again after the write would race the reader instead.
 func (q *quiet) writing() {
 	if q == nil {
 		return

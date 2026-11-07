@@ -94,7 +94,7 @@ func (b *bridgeHarness) initialize(t *testing.T, user string) string {
 	return res.Header.Get(sessionHeader)
 }
 
-// events reads SSE data lines one at a time.
+// events reads SSE data lines one at a time and counts comment lines (keep-alives).
 type events struct {
 	t        *testing.T
 	ch       chan string
