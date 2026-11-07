@@ -38,14 +38,31 @@ func TestQuietSignalsAfterTheIntervalAndAWriteDropsADueSignal(t *testing.T) {
 	if ready(q) {
 		t.Fatal("signalled before the interval")
 	}
-	clk.Advance(time.Nanosecond)
+	clk.Advance(time.Nanosecond) // fires while nobody is receiving: the signal must be kept
+	if !ready(q) {
+		t.Fatal("no signal after the interval")
+	}
+	clk.Advance(keepAliveInterval) // the timer is not re-armed until the next write
 	q.writing()
+	clk.Advance(keepAliveInterval - time.Nanosecond)
+	q.writing()
+	if ready(q) {
+		t.Fatal("signalled while writes came within the interval")
+	}
+	clk.Advance(keepAliveInterval)
+	q.writing() // a signal already due is dropped by a write
 	if ready(q) {
 		t.Fatal("a signal already due survived a write")
 	}
 	clk.Advance(keepAliveInterval)
 	if !ready(q) {
 		t.Fatal("no signal a full interval after the write")
+	}
+	q.writing() // armed again
+	q.stop()
+	clk.Advance(keepAliveInterval)
+	if ready(q) {
+		t.Fatal("signalled after stop")
 	}
 	var none *quiet // a stream that needs no keep-alive
 	none.writing()
